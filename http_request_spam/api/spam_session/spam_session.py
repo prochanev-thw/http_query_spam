@@ -35,41 +35,43 @@ class SpamSession:
         self.queue = queue
         self.start_date = start_date
 
-    async def check_status_code(self, params, session, second_number):
+    async def check_status_code(self, params, session, second_number, sem):
         loop = asyncio.get_running_loop()
         start_time = loop.time()
-        try: 
-            async with session.get(**params, timeout=TIMEOUT, ssl=False) as response:
-                await response.read()
-                response_time = loop.time() - start_time
+        
+        async with sem:
+            try:
+                async with session.get(**params, timeout=TIMEOUT, ssl=False) as response:
+                    await response.read()
+                    response_time = loop.time() - start_time
+                    return (
+                        params['url'],
+                        params.get('proxy', 'localhost'),
+                        response.status,
+                        response_time,
+                    )
 
+            except aiohttp.client_exceptions.ClientError as exc:
                 return (
                     params['url'],
-                    params.get('proxy'),
-                    response.status,
-                    response_time,
-                )
-
-        except aiohttp.client_exceptions.ClientError as exc:
-            return (
-                    params['url'],
-                    params.get('proxy'),
-                    exc,
+                    params.get('proxy', 'localhost'),
+                    str(exc),
                     '',
                 )
 
-        except asyncio.exceptions.TimeoutError as exc:
-            return (
-                params['url'],
-                params.get('proxy'),
-                'timeout error',
-                '',
-            )
+            except asyncio.exceptions.TimeoutError as exc:
+                return (
+                    params['url'],
+                    params.get('proxy', 'localhost'),
+                    'timeout error',
+                    '',
+                )
 
     
     async def run_session(self):
+        sem = asyncio.Semaphore(4000)
         logger.info('Старт сессии в процессе %d', os.getpid())
-        connector = aiohttp.connector.TCPConnector(limit=self.request_count)
+        connector = aiohttp.TCPConnector(limit=500)
         session = aiohttp.ClientSession(connector=connector)
         tasks = []
         for second_number in range(1, self.duration_in_seconds + 1):
@@ -80,21 +82,29 @@ class SpamSession:
                 self.use_proxy
             )
             for params in params_portion:
-                tasks.append(asyncio.create_task(self.check_status_code(params, session, second_number)))
-                logger.info(f"Порция из {self.request_count} запросов отправлена для url {params['url']} start_date {self.start_date} duration {self.duration_in_seconds}'")
+                tasks.append(asyncio.create_task(self.check_status_code(params, session, second_number, sem)))
+            logger.info(f"Порция из {self.request_count} запросов отправлена для url {params['url']} start_date {self.start_date} duration {self.duration_in_seconds}'")
             await asyncio.sleep(1)
-        results = await asyncio.gather(*tasks)
+        result = await asyncio.gather(*tasks)
         await session.close()
-        return results
+        return result
 
     def run(self):
+        
+        def make_chunks(data, length):
+            for i in range(0, len(data), length):
+                yield data[i:i+length]
+
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        asyncio.set_event_loop(asyncio.ProactorEventLoop())
         result = asyncio.run(self.run_session())
-        self.queue.put(
-            {
-                'start_date': self.start_date,
-                'duration': self.duration_in_seconds,
-                'response': result,
-            }
-        )
+        for chunk in make_chunks(result, 1000):
+            self.queue.put(
+                {
+                    'start_date': self.start_date,
+                    'duration': self.duration_in_seconds,
+                    'response': chunk,
+                }
+            )
         logger.info(f'Данные по ответам записаны в файл для start_date: {self.start_date}, duration: {self.duration_in_seconds}')
+        

@@ -30,7 +30,7 @@ def log_file_listener(queue):
 
         logger.info(f'Данные по ответам сервера получены в очереди для записи логов для start_date {start_date} duration {duration}')
 
-        with open(f'{start_date.replace(".", "-").replace(":", "_")} - {duration}.csv', 'w', newline="") as f:
+        with open(f'{start_date.replace(".", "-").replace(":", "_")} - {duration}.csv', 'a', newline="") as f:
             writer = csv.writer(f)
             for data in result['response']:
                 writer.writerow(list(data))
@@ -95,7 +95,7 @@ if __name__ == '__main__':
     try:
         # держим живым основной поток, который запускал планировщик
         while True:
-            time.sleep(10)
+            time.sleep(1)
     except (KeyboardInterrupt, SystemExit):
         log_file_process.terminate()
         pool.terminate()
