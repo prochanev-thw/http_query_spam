@@ -69,7 +69,7 @@ class SpamSession:
 
     
     async def run_session(self):
-        sem = asyncio.Semaphore(4000)
+        sem = asyncio.Semaphore(6_000)
         logger.info('Старт сессии в процессе %d', os.getpid())
         connector = aiohttp.TCPConnector(limit=500)
         session = aiohttp.ClientSession(connector=connector)
