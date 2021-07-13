@@ -3,6 +3,7 @@ import aiohttp
 import os
 import logging
 import datetime
+import csv
 
 
 from ..params import RequestParamsGenerator, create_request_params
@@ -19,7 +20,6 @@ class SpamSession:
         request_count: int,
         duration_in_seconds: int,
         use_proxy: bool,
-        queue,
         start_date
     ):
         self.request_count = request_count
@@ -32,7 +32,6 @@ class SpamSession:
             'http_request_spam/program_params/cookies.txt',
         )
         logger.info('Параметры запросов обновлены')
-        self.queue = queue
         self.start_date = start_date
 
     async def check_status_code(self, params, session, second_number, sem):
@@ -69,9 +68,9 @@ class SpamSession:
 
     
     async def run_session(self):
-        sem = asyncio.Semaphore(6_000)
+        sem = asyncio.Semaphore(10_000)
         logger.info('Старт сессии в процессе %d', os.getpid())
-        connector = aiohttp.TCPConnector(limit=500)
+        connector = aiohttp.TCPConnector(limit=600)
         session = aiohttp.ClientSession(connector=connector)
         tasks = []
         for second_number in range(1, self.duration_in_seconds + 1):
@@ -84,27 +83,22 @@ class SpamSession:
             for params in params_portion:
                 tasks.append(asyncio.create_task(self.check_status_code(params, session, second_number, sem)))
             logger.info(f"Порция из {self.request_count} запросов отправлена для url {params['url']} start_date {self.start_date} duration {self.duration_in_seconds}'")
-            await asyncio.sleep(1)
         result = await asyncio.gather(*tasks)
         await session.close()
         return result
 
     def run(self):
-        
-        def make_chunks(data, length):
-            for i in range(0, len(data), length):
-                yield data[i:i+length]
 
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
         asyncio.set_event_loop(asyncio.ProactorEventLoop())
+
+        logger.info('Старт запросов')
         result = asyncio.run(self.run_session())
-        for chunk in make_chunks(result, 1000):
-            self.queue.put(
-                {
-                    'start_date': self.start_date,
-                    'duration': self.duration_in_seconds,
-                    'response': chunk,
-                }
-            )
+
+        with open(f'{self.start_date.replace(".", "-").replace(":", "_")} - {self.duration_in_seconds}.csv', 'w', newline='') as f:
+            writer = csv.writer(f)
+            for r in result:
+                writer.writerow(list(r))
+
+        logger.info('Данные записаны')
         logger.info(f'Данные по ответам записаны в файл для start_date: {self.start_date}, duration: {self.duration_in_seconds}')
-        
