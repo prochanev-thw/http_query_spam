@@ -115,7 +115,7 @@ if __name__ == '__main__':
     try:
         # держим живым основной поток, который запускал планировщик
         while True:
-            if done_jobs
+            if done_jobs:
                 logger.info(f'Ожидание задачи')
                 time.sleep(10)
             else:
